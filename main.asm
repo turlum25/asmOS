@@ -11,12 +11,12 @@ kernel_entry:
     mov ds, ax
     mov es, ax
     mov ss, ax
-    mov esp, 0x7C00
+    mov esp, 0x90000
 
     mov edi, 0xB8000
 
     printcol "booted", WHITE
-    printcol "", WHITE 
+    printcol "", WHITE
 
     read_sector_32 0, 0x60000
     jc disk_error
@@ -24,19 +24,17 @@ kernel_entry:
     mov esi, 0x60000
     mov ax, [esi + 0x0E]
     mov [fat_start_sector], ax
+    jmp shell_loop
+
+disk_error:
+    printcol "Disk read error", RED
+    printcol "Entering standalone mode", YELLOW
+    printcol "", WHITE
 
 shell_loop:
     input "# ", 0x50000, 0x50040
     call handle_command
     jmp shell_loop
-
-disk_error:
-    printcol "Disk read error", RED
-
-.halt:
-    cli
-    hlt
-    jmp .halt
 
 handle_command:
     mov esi, 0x50000
@@ -57,20 +55,54 @@ handle_command:
     test eax, eax
     jnz .exit
 
-    printcol "Unknown command", RED ; I can't add a blank printcol here. It breaks the entire damn input.
+    mov esi, 0x50000
+    cmp byte [esi], 'e'
+    jne .check_clear
+    cmp byte [esi + 1], 'c'
+    jne .check_clear
+    cmp byte [esi + 2], 'h'
+    jne .check_clear
+    cmp byte [esi + 3], 'o'
+    jne .check_clear
+    cmp byte [esi + 4], ' '
+    jne .check_clear
+
+    add esi, 5
+    call print_string
+    call newline_32
+    ret
+
+.check_clear:
+    mov esi, 0x50000
+    mov ebx, command_clear
+    call command_equals
+    test eax, eax
+    jnz .clear
+
+    printcol "Unknown command", RED
     ret
 
 .help:
-    printcol "help - show this message", WHITE
-    printcol "ver  - show version", WHITE
-    printcol "exit - exit OS instance", WHITE
-    printcol "", WHITE 
+    printcol "help  - show this message", WHITE
+    printcol "ver   - show version", WHITE
+    printcol "echo  - echo text"  , WHITE
+    printcol "clear - clear the screen", WHITE
+    printcol "exit  - exit OS instance", WHITE
+    printcol "", WHITE
     ret
 
 .ver:
     printcol "asmOS - By Turlum25", GREEN
-    printcol "Version 0.01", WHITE
+    printcol "Version 0.02", WHITE
     printcol "", WHITE
+    ret
+
+.clear:
+    mov edi, 0xB8000
+    mov ax, 0x0720
+    mov ecx, 2000
+    rep stosw
+    mov edi, 0xB8000
     ret
 
 .exit:
@@ -107,6 +139,22 @@ command_equals:
     pop ebx
     pop edi
     pop esi
+    ret
+
+print_string:
+    mov ah, WHITE
+
+.next:
+    lodsb
+    test al, al
+    jz .done
+
+    mov [edi], al
+    mov byte [edi + 1], WHITE
+    add edi, 2
+    jmp .next
+
+.done:
     ret
 
 exitos:
@@ -232,14 +280,13 @@ ata_read_sector:
 
 .wait_status:
     in al, dx
-
-    test al, 1
-    jnz .fail
-
     test al, 0x80
     jnz .status_again
-
-    test al, 8
+    
+    test al, 0x01
+    jnz .fail
+    
+    test al, 0x08
     jnz .data_ready
 
 .status_again:
@@ -302,6 +349,9 @@ command_ver:
 
 command_exit:
     db "exit", 0
+
+command_clear:
+    db "clear", 0
 
 fat_start_sector:
     dw 0
